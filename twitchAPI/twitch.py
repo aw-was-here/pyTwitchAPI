@@ -252,8 +252,14 @@ class Twitch:
 
     def __await__(self):
         if self._authenticate_app:
-            t = asyncio.create_task(self.authenticate_app(self._target_app_scope if self._target_app_scope is not None else []))
-            yield from t
+            yield from asyncio.create_task(
+                self.authenticate_app(
+                    self._target_app_scope
+                    if self._target_app_scope is not None
+                    else []
+                )
+            )
+
         return self
 
     async def close(self):
@@ -274,14 +280,14 @@ class Twitch:
                 raise UnauthorizedException('Require app authentication!')
             for s in required_scope:
                 if s not in self.__app_auth_scope:
-                    raise MissingScopeException('Require app auth scope ' + s.name)
+                    raise MissingScopeException(f'Require app auth scope {s.name}')
             header['Authorization'] = f'Bearer {self.__app_auth_token}'
         elif auth_type == AuthType.USER:
             if not self.__has_user_auth:
                 raise UnauthorizedException('require user authentication!')
             for s in required_scope:
                 if s not in self.__user_auth_scope:
-                    raise MissingScopeException('Require user auth scope ' + s.name)
+                    raise MissingScopeException(f'Require user auth scope {s.name}')
             header['Authorization'] = f'Bearer {self.__user_auth_token}'
         elif auth_type == AuthType.NONE:
             # set one anyway for better performance if possible but don't error if none found
@@ -291,7 +297,7 @@ class Twitch:
         return header
 
     def __get_used_either_auth(self, required_scope: List[AuthScope]) -> \
-            (bool, AuthType, Union[None, str], List[AuthScope]):
+                (bool, AuthType, Union[None, str], List[AuthScope]):
         if self.has_required_auth(AuthType.USER, required_scope):
             return True, AuthType.USER, self.__user_auth_token, self.__user_auth_scope
         if self.has_required_auth(AuthType.APP, required_scope):
@@ -307,21 +313,21 @@ class Twitch:
             return True
         if required_type == AuthType.EITHER:
             return self.has_required_auth(AuthType.USER, required_scope) or \
-                   self.has_required_auth(AuthType.APP, required_scope)
+                       self.has_required_auth(AuthType.APP, required_scope)
         if required_type == AuthType.USER:
-            if not self.__has_user_auth:
-                return False
-            for s in required_scope:
-                if s not in self.__user_auth_scope:
-                    return False
-            return True
+            return (
+                all(s in self.__user_auth_scope for s in required_scope)
+                if self.__has_user_auth
+                else False
+            )
+
         if required_type == AuthType.APP:
-            if not self.__has_app_auth:
-                return False
-            for s in required_scope:
-                if s not in self.__app_auth_scope:
-                    return False
-            return True
+            return (
+                all(s in self.__app_auth_scope for s in required_scope)
+                if self.__has_app_auth
+                else False
+            )
+
         # default to false
         return False
 
@@ -352,29 +358,50 @@ class Twitch:
                                      data: Optional[dict] = None,
                                      retries: int = 1
                                      ) -> ClientResponse:
-        if self.auto_refresh_auth and retries > 0:
-            if response.status == 401:
-                # unauthorized, lets try to refresh the token once
-                self.__logger.debug('got 401 response -> try to refresh token')
-                await self.refresh_used_token()
-                if reply_func_has_data:
-                    return await retry_func(url, auth_type, required_scope, data=data, retries=retries - 1)
-                else:
-                    return await retry_func(url, auth_type, required_scope, retries=retries - 1)
-            elif response.status == 503:
-                # service unavailable, retry exactly once as recommended by twitch documentation
-                self.__logger.debug('got 503 response -> retry once')
-                if reply_func_has_data:
-                    return await retry_func(url, auth_type, required_scope, data=data, retries=retries - 1)
-                else:
-                    return await retry_func(url, auth_type, required_scope, retries=retries - 1)
-        elif self.auto_refresh_auth and retries <= 0:
-            if response.status == 503:
-                raise TwitchBackendException('The Twitch API returns a server error')
-            if response.status == 401:
-                msg = (await response.json()).get('message', '')
-                self.__logger.debug(f'got 401 response and can\'t refresh. Message: "{msg}"')
-                raise UnauthorizedException(msg)
+        if self.auto_refresh_auth:
+            if retries > 0:
+                if response.status == 401:
+                    # unauthorized, lets try to refresh the token once
+                    self.__logger.debug('got 401 response -> try to refresh token')
+                    await self.refresh_used_token()
+                    return (
+                        await retry_func(
+                            url,
+                            auth_type,
+                            required_scope,
+                            data=data,
+                            retries=retries - 1,
+                        )
+                        if reply_func_has_data
+                        else await retry_func(
+                            url, auth_type, required_scope, retries=retries - 1
+                        )
+                    )
+
+                elif response.status == 503:
+                    # service unavailable, retry exactly once as recommended by twitch documentation
+                    self.__logger.debug('got 503 response -> retry once')
+                    return (
+                        await retry_func(
+                            url,
+                            auth_type,
+                            required_scope,
+                            data=data,
+                            retries=retries - 1,
+                        )
+                        if reply_func_has_data
+                        else await retry_func(
+                            url, auth_type, required_scope, retries=retries - 1
+                        )
+                    )
+
+            else:
+                if response.status == 503:
+                    raise TwitchBackendException('The Twitch API returns a server error')
+                if response.status == 401:
+                    msg = (await response.json()).get('message', '')
+                    self.__logger.debug(f'got 401 response and can\'t refresh. Message: "{msg}"')
+                    raise UnauthorizedException(msg)
         if response.status == 500:
             raise TwitchBackendException('Internal Server Error')
         if response.status == 400:
@@ -502,9 +529,11 @@ class Twitch:
                 response = await req(_url, auth_type, auth_scope)
             else:
                 response = await req(_url, auth_type, auth_scope, data=body_data)
-            if error_handler is not None:
-                if response.status in error_handler.keys():
-                    raise error_handler[response.status]
+            if (
+                error_handler is not None
+                and response.status in error_handler.keys()
+            ):
+                raise error_handler[response.status]
             data = await response.json()
             for entry in data.get('data', []):
                 yield return_type(**entry)
@@ -577,9 +606,8 @@ class Twitch:
             response = await req(_url, auth_type, auth_scope)
         else:
             response = await req(_url, auth_type, auth_scope, data=body_data)
-        if error_handler is not None:
-            if response.status in error_handler.keys():
-                raise error_handler[response.status]
+        if error_handler is not None and response.status in error_handler.keys():
+            raise error_handler[response.status]
         if result_type == ResultType.STATUS_CODE:
             return response.status
         if result_type == ResultType.TEXT:
@@ -592,14 +620,10 @@ class Twitch:
             if origin == list:
                 c = return_type.__args__[0]
                 return [x if isinstance(x, c) else c(**x) for x in data['data']]
-            if get_from_data:
-                d = data['data']
-                if isinstance(d, list):
-                    return return_type(**d[0])
-                else:
-                    return return_type(**d)
-            else:
+            if not get_from_data:
                 return return_type(**data)
+            d = data['data']
+            return return_type(**d[0]) if isinstance(d, list) else return_type(**d)
 
     async def __generate_app_token(self) -> None:
         if self.app_secret is None:
@@ -613,7 +637,7 @@ class Twitch:
         if self._session is None:
             self._session = ClientSession()
         self.__logger.debug('generating fresh app token')
-        url = build_url(TWITCH_AUTH_BASE_URL + 'oauth2/token', params)
+        url = build_url(f'{TWITCH_AUTH_BASE_URL}oauth2/token', params)
         result = await self._session.post(url)
         if result.status != 200:
             raise TwitchAuthorizationException(f'Authentication failed with code {result.status} ({result.text})')
@@ -959,9 +983,11 @@ class Twitch:
         :raises ~twitchAPI.types.TwitchBackendException: if the Twitch API itself runs into problems
         :raises ValueError: if non_moderator_chat_delay_duration is not one of 2, 4 or 6
         """
-        if non_moderator_chat_delay_duration is not None:
-            if non_moderator_chat_delay_duration not in (2, 4, 6):
-                raise ValueError('non_moderator_chat_delay_duration has to be one of 2, 4 or 6')
+        if (
+            non_moderator_chat_delay_duration is not None
+            and non_moderator_chat_delay_duration not in (2, 4, 6)
+        ):
+            raise ValueError('non_moderator_chat_delay_duration has to be one of 2, 4 or 6')
         url_param = {
             'broadcaster_id': broadcaster_id,
             'moderator_id': moderator_id
@@ -1039,7 +1065,16 @@ class Twitch:
         """
         if clip_id is not None and len(clip_id) > 100:
             raise ValueError('A maximum of 100 clips can be queried in one call')
-        if not (sum([clip_id is not None, broadcaster_id is not None, game_id is not None]) == 1):
+        if (
+            sum(
+                [
+                    clip_id is not None,
+                    broadcaster_id is not None,
+                    game_id is not None,
+                ]
+            )
+            != 1
+        ):
             raise ValueError('You need to specify exactly one of clip_id, broadcaster_id or game_id')
         if first < 1 or first > 100:
             raise ValueError('first must be in range 1 to 100')
@@ -1073,7 +1108,7 @@ class Twitch:
         :raises ~twitchAPI.types.TwitchBackendException: if the Twitch API itself runs into problems
         :raises ValueError: if length of code is not in range 1 to 20
         """
-        if len(code) > 20 or len(code) < 1:
+        if len(code) > 20 or not code:
             raise ValueError('only between 1 and 20 codes are allowed')
         param = {
             'code': code,
@@ -1099,7 +1134,7 @@ class Twitch:
         :raises ~twitchAPI.types.TwitchBackendException: if the Twitch API itself runs into problems
         :raises ValueError: if length of code is not in range 1 to 20
         """
-        if len(code) > 20 or len(code) < 1:
+        if len(code) > 20 or not code:
             raise ValueError('only between 1 and 20 codes are allowed')
         param = {
             'code': code,
@@ -1256,7 +1291,7 @@ class Twitch:
         """
         if duration is not None and (duration < 1 or duration > 1_209_600):
             raise ValueError('duration must be either omitted or between 1 and 1209600')
-        if len(reason) < 1 or len(reason) > 500:
+        if not reason or len(reason) > 500:
             raise ValueError('reason must be between 1 and 500 characters in length')
         param = {
             'broadcaster_id': broadcaster_id,
@@ -1923,9 +1958,10 @@ class Twitch:
         :raises ~twitchAPI.types.TwitchBackendException: if the Twitch API itself runs into problems
         :raises ValueError: if broadcaster_id is a list and does not have between 1 and 100 entries
         """
-        if isinstance(broadcaster_id, list):
-            if len(broadcaster_id) < 1 or len(broadcaster_id) > 100:
-                raise ValueError('broadcaster_id has to have between 1 and 100 entries')
+        if isinstance(broadcaster_id, list) and (
+            len(broadcaster_id) < 1 or len(broadcaster_id) > 100
+        ):
+            raise ValueError('broadcaster_id has to have between 1 and 100 entries')
         return await self._build_result('GET', 'channels', {'broadcaster_id': broadcaster_id}, AuthType.EITHER, [], List[ChannelInformation],
                                         split_lists=True)
 
@@ -2138,9 +2174,8 @@ class Twitch:
         if first < 1 or first > 1000:
             raise ValueError('first must be between 1 and 1000')
         can_use, auth_type, token, scope = self.__get_used_either_auth([])
-        if auth_type == AuthType.USER:
-            if user_id is not None:
-                raise ValueError('cant use user_id when using User Authentication')
+        if auth_type == AuthType.USER and user_id is not None:
+            raise ValueError('cant use user_id when using User Authentication')
         param = {
             'id': entitlement_id,
             'user_id': user_id,
@@ -2512,7 +2547,7 @@ class Twitch:
         :raises ~twitchAPI.types.TwitchAPIException: if a Query Parameter is missing or invalid
         :raises ValueError: if video_ids contains more than 5 entries or is a empty list
         """
-        if video_ids is None or len(video_ids) == 0 or len(video_ids) > 5:
+        if video_ids is None or not video_ids or len(video_ids) > 5:
             raise ValueError('video_ids must contain between 1 and 5 entries')
         return await self._build_result('DELETE', 'videos', {'id': video_ids}, AuthType.USER, [AuthScope.CHANNEL_MANAGE_VIDEOS], List[str],
                                         split_lists=True)
@@ -2693,10 +2728,11 @@ class Twitch:
         """
         if duration < 15 or duration > 1800:
             raise ValueError('duration must be between 15 and 1800')
-        if channel_points_per_vote is not None:
-            if channel_points_per_vote < 0 or channel_points_per_vote > 1_000_000:
-                raise ValueError('channel_points_per_vote must be in range 0 to 1000000')
-        if len(choices) < 0 or len(choices) > 5:
+        if channel_points_per_vote is not None and (
+            channel_points_per_vote < 0 or channel_points_per_vote > 1_000_000
+        ):
+            raise ValueError('channel_points_per_vote must be in range 0 to 1000000')
+        if len(choices) > 5:
             raise ValueError('require between 2 and 5 choices')
         body = {k: v for k, v in {
             'broadcaster_id': broadcaster_id,
@@ -2763,9 +2799,8 @@ class Twitch:
         """
         if first is not None and (first < 1 or first > 20):
             raise ValueError('first must be in range 1 to 20')
-        if prediction_ids is not None:
-            if len(prediction_ids) > 100:
-                raise ValueError('maximum of 100 prediction ids allowed')
+        if prediction_ids is not None and len(prediction_ids) > 100:
+            raise ValueError('maximum of 100 prediction ids allowed')
 
         param = {
             'broadcaster_id': broadcaster_id,
@@ -2838,9 +2873,8 @@ class Twitch:
         """
         if status not in (PredictionStatus.RESOLVED, PredictionStatus.CANCELED, PredictionStatus.LOCKED):
             raise ValueError('status has to be one of RESOLVED, CANCELED or LOCKED')
-        if status == PredictionStatus.RESOLVED:
-            if winning_outcome_id is None:
-                raise ValueError('need to specify winning_outcome_id for status RESOLVED')
+        if status == PredictionStatus.RESOLVED and winning_outcome_id is None:
+            raise ValueError('need to specify winning_outcome_id for status RESOLVED')
         body = {
             'broadcaster_id': broadcaster_id,
             'id': prediction_id,
@@ -2988,7 +3022,7 @@ class Twitch:
         :raises ~twitchAPI.types.TwitchBackendException: if the Twitch API itself runs into problems
         :raises ~twitchAPI.types.TwitchAPIException: if a Query Parameter is missing or invalid
         """
-        if len(emote_set_id) == 0 or len(emote_set_id) > 25:
+        if not emote_set_id or len(emote_set_id) > 25:
             raise ValueError('you need to specify between 1 and 25 emote_set_ids')
         return await self._build_result('GET', 'chat/emotes/set', {'emote_set_id': emote_set_id}, AuthType.EITHER, [], GetEmotesResponse,
                                         split_lists=True)
@@ -3277,7 +3311,7 @@ class Twitch:
         :raises ~twitchAPI.types.TwitchAPIException: if a Query Parameter is missing or invalid
         :raises ValueError: if message is empty
         """
-        if len(message) == 0:
+        if not message:
             raise ValueError('message can\'t be empty')
         param = {
             'from_user_id': from_user_id,

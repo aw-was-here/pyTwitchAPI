@@ -141,7 +141,10 @@ class EventSub:
         self.__ssl_context: Optional[SSLContext] = ssl_context
         self.__twitch: Twitch = twitch
         self.__logger: Logger = getLogger('twitchAPI.eventsub')
-        self.secret: str = ''.join(random.choice(string.ascii_lowercase) for i in range(20))
+        self.secret: str = ''.join(
+            random.choice(string.ascii_lowercase) for _ in range(20)
+        )
+
         """A random secret string. Set this for added security. |default| :code:`A random 20 character long string`"""
         self.wait_for_subscription_confirm: bool = True
         """Set this to false if you don't want to wait for a subscription confirm. |default| :code:`True`"""
@@ -172,6 +175,7 @@ class EventSub:
         async def _mk_session():
             if self._session is None:
                 self._session = aiohttp.ClientSession()
+
         self.__hook_runner = runner
         self.__hook_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.__hook_loop)
@@ -179,7 +183,7 @@ class EventSub:
         self.__hook_loop.run_until_complete(runner.setup())
         site = web.TCPSite(runner, str(self._host), self._port, ssl_context=self.__ssl_context)
         self.__hook_loop.run_until_complete(site.start())
-        self.__logger.info('started twitch API event sub on port ' + str(self._port))
+        self.__logger.info(f'started twitch API event sub on port {str(self._port)}')
         try:
             self.__hook_loop.run_forever()
         except (CancelledError, asyncio.CancelledError):
@@ -268,7 +272,10 @@ class EventSub:
                 'secret': self.secret
             }
         }
-        r_data = await self.__api_post_request(TWITCH_API_BASE_URL + 'eventsub/subscriptions', data=data)
+        r_data = await self.__api_post_request(
+            f'{TWITCH_API_BASE_URL}eventsub/subscriptions', data=data
+        )
+
         result = await r_data.json()
         error = result.get('error')
         if r_data.status == 500:
@@ -309,7 +316,7 @@ class EventSub:
     async def __handle_challenge(self, request: 'web.Request', data: dict):
         self.__logger.debug(f'received challenge for subscription {data.get("subscription").get("id")}')
         if not await self._verify_signature(request):
-            self.__logger.warning(f'message signature is not matching! Discarding message')
+            self.__logger.warning('message signature is not matching! Discarding message')
             return web.Response(status=403)
         self.__activate_callback(data.get('subscription').get('id'))
         return web.Response(text=data.get('challenge'))
@@ -324,7 +331,7 @@ class EventSub:
             self.__logger.error(f'received event for unknown subscription with ID {sub_id}')
         else:
             if not await self._verify_signature(request):
-                self.__logger.warning(f'message signature is not matching! Discarding message')
+                self.__logger.warning('message signature is not matching! Discarding message')
                 return web.Response(status=403)
             self.__hook_loop.create_task(callback['callback'](data))
         return web.Response(status=200)

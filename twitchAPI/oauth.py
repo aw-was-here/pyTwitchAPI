@@ -89,7 +89,7 @@ async def refresh_access_token(refresh_token: str,
         'grant_type': 'refresh_token',
         'client_secret': app_secret
     }
-    url = build_url(TWITCH_AUTH_BASE_URL + 'oauth2/token', {})
+    url = build_url(f'{TWITCH_AUTH_BASE_URL}oauth2/token', {})
     ses = session if session is not None else aiohttp.ClientSession()
     async with ses.post(url, data=param) as result:
         data = await result.json()
@@ -113,7 +113,7 @@ async def validate_token(access_token: str,
     :return: response from the api
     """
     header = {'Authorization': f'OAuth {access_token}'}
-    url = build_url(TWITCH_AUTH_BASE_URL + 'oauth2/validate', {})
+    url = build_url(f'{TWITCH_AUTH_BASE_URL}oauth2/validate', {})
     ses = session if session is not None else aiohttp.ClientSession()
     async with ses.get(url, headers=header) as result:
         data = await result.json()
@@ -134,7 +134,7 @@ async def get_user_info(access_token: str,
     """
     header = {'Authorization': f'Bearer {access_token}',
               'Content-Type': 'application/json'}
-    url = build_url(TWITCH_AUTH_BASE_URL + 'oauth2/userinfo', {})
+    url = build_url(f'{TWITCH_AUTH_BASE_URL}oauth2/userinfo', {})
     ses = session if session is not None else aiohttp.ClientSession()
     async with ses.get(url, headers=header) as result:
         data = await result.json()
@@ -156,10 +156,11 @@ async def revoke_token(client_id: str,
     :rtype: bool
     :return: :code:`True` if revoking succeeded, otherwise :code:`False`
     """
-    url = build_url(TWITCH_AUTH_BASE_URL + 'oauth2/revoke', {
-        'client_id': client_id,
-        'token': access_token
-    })
+    url = build_url(
+        f'{TWITCH_AUTH_BASE_URL}oauth2/revoke',
+        {'client_id': client_id, 'token': access_token},
+    )
+
     ses = session if session is not None else aiohttp.ClientSession()
     async with ses.post(url) as result:
         ret = result.status == 200
@@ -224,7 +225,7 @@ class UserAuthenticator:
             'force_verify': str(self.force_verify).lower(),
             'state': self.__state
         }
-        return build_url(TWITCH_AUTH_BASE_URL + 'oauth2/authorize', params)
+        return build_url(f'{TWITCH_AUTH_BASE_URL}oauth2/authorize', params)
 
     def __build_runner(self):
         app = web.Application()
@@ -328,14 +329,14 @@ class UserAuthenticator:
             'grant_type': 'authorization_code',
             'redirect_uri': self.url
         }
-        url = build_url(TWITCH_AUTH_BASE_URL + 'oauth2/token', param)
+        url = build_url(f'{TWITCH_AUTH_BASE_URL}oauth2/token', param)
         async with aiohttp.ClientSession() as session:
             async with session.post(url) as response:
                 data: dict = await response.json()
         if callback_func is None:
             self.stop()
             if data.get('access_token') is None:
-                raise TwitchAPIException(f'Authentication failed:\n{str(data)}')
+                raise TwitchAPIException(f'Authentication failed:\n{data}')
             return data['access_token'], data['refresh_token']
         elif user_token is not None:
             self.__callback_func(data['access_token'], data['refresh_token'])

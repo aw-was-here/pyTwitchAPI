@@ -85,17 +85,15 @@ class TwitchObject:
                 val = getattr(self, name)
             except AttributeError:
                 pass
-            if val is None and not include_none_values:
-                continue
-            d[name] = TwitchObject._dict_val_by_instance(cls, val, include_none_values)
+            if val is not None or include_none_values:
+                d[name] = TwitchObject._dict_val_by_instance(cls, val, include_none_values)
         return d
 
     def __init__(self, **kwargs):
         merged_annotations = self._get_annotations()
         for name, cls in merged_annotations.items():
-            if name not in kwargs.keys():
-                continue
-            self.__setattr__(name, TwitchObject._val_by_instance(cls, kwargs.get(name)))
+            if name in kwargs:
+                self.__setattr__(name, TwitchObject._val_by_instance(cls, kwargs.get(name)))
 
 
 class IterTwitchObject(TwitchObject):
@@ -103,8 +101,7 @@ class IterTwitchObject(TwitchObject):
     def __iter__(self):
         if not hasattr(self, 'data') or not isinstance(self.__getattribute__('data'), list):
             raise ValueError('Object is missing data attribute of type list')
-        for i in self.__getattribute__('data'):
-            yield i
+        yield from self.__getattribute__('data')
 
 
 class AsyncIterTwitchObject(TwitchObject, Generic[T]):

@@ -335,8 +335,7 @@ class Chat:
         self._closing: bool = False
 
     def __await__(self):
-        t = asyncio.create_task(self._get_username())
-        yield from t
+        yield from asyncio.create_task(self._get_username())
         return self
 
     async def _get_username(self):
@@ -348,12 +347,6 @@ class Chat:
     ##################################################################################################################################################
 
     def _parse_irc_message(self, message: str):
-        parsed_message = {
-            'tags': None,
-            'source': None,
-            'command': None,
-            'parameters': None
-        }
         idx = 0
         raw_tags_component = None
         raw_source_component = None
@@ -380,7 +373,12 @@ class Chat:
             idx = end_idx + 1
             raw_parameters_component = message[idx::]
 
-        parsed_message['command'] = self._parse_irc_command(raw_command_component)
+        parsed_message = {
+            'tags': None,
+            'source': None,
+            'parameters': None,
+            'command': self._parse_irc_command(raw_command_component),
+        }
 
         if parsed_message['command'] is None:
             return None
@@ -426,15 +424,15 @@ class Chat:
             parsed_tag = tag.split('=')
             tag_value = None if parsed_tag[1] == '' else parsed_tag[1]
             if parsed_tag[0] in ('badges', 'badge-info'):
-                if tag_value is not None:
+                if tag_value is None:
+                    parsed_tags[parsed_tag[0]] = None
+                else:
                     d = {}
                     badges = tag_value.split(',')
                     for pair in badges:
                         badge_parts = pair.split('/', 1)
                         d[badge_parts[0]] = badge_parts[1]
                     parsed_tags[parsed_tag[0]] = d
-                else:
-                    parsed_tags[parsed_tag[0]] = None
             elif parsed_tag[0] == 'emotes':
                 if tag_value is not None:
                     d = {}
@@ -455,9 +453,8 @@ class Chat:
                     parsed_tags[parsed_tag[0]] = None
             elif parsed_tag[0] == 'emote-sets':
                 parsed_tags[parsed_tag[0]] = tag_value.split(',')
-            else:
-                if parsed_tag[0] not in tags_to_ignore:
-                    parsed_tags[parsed_tag[0]] = tag_value
+            elif parsed_tag[0] not in tags_to_ignore:
+                parsed_tags[parsed_tag[0]] = tag_value
         return parsed_tags
 
     def _parse_irc_command(self, raw_command_component: str):
@@ -623,8 +620,17 @@ class Chat:
     async def _handle_cap_reply(self, parsed: dict):
         self.logger.debug(f'got CAP reply, granted caps: {parsed["parameters"]}')
         caps = parsed['parameters'].split()
-        if not all([x in caps for x in ['twitch.tv/membership', 'twitch.tv/tags', 'twitch.tv/commands']]):
-            self.logger.warning(f'chat bot did not get all requested capabilities granted, this might result in weird bot behavior!')
+        if any(
+            x not in caps
+            for x in [
+                'twitch.tv/membership',
+                'twitch.tv/tags',
+                'twitch.tv/commands',
+            ]
+        ):
+            self.logger.warning(
+                'chat bot did not get all requested capabilities granted, this might result in weird bot behavior!'
+            )
 
     async def _handle_join(self, parsed: dict):
         ch = parsed['command']['channel'][1:]
@@ -748,7 +754,7 @@ class Chat:
             self._room_join_locks.append(r)
         await self._send_message(f'JOIN {room_str}')
         # wait for us to join all rooms
-        while any([r in self._room_join_locks for r in target]):
+        while any(r in self._room_join_locks for r in target):
             await asyncio.sleep(0.01)
 
     async def send_message(self, room: Union[str, ChatRoom], text: str):
@@ -756,7 +762,7 @@ class Chat:
             room = room.name
         if len(room) == 0:
             raise ValueError('please specify a room to post to')
-        if len(text) == 0:
+        if not text:
             raise ValueError('you can\'t send a empty message')
         if room[0] != '#':
             room = f'#{room}'
@@ -775,5 +781,5 @@ class Chat:
             self._room_leave_locks.append(r)
         await self._send_message(f'PART {room_str}')
         # wait to leave all rooms
-        while any([r in self._room_leave_locks for r in target]):
+        while any(r in self._room_leave_locks for r in target):
             await asyncio.sleep(0.01)

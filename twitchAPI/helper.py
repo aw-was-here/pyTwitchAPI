@@ -50,16 +50,14 @@ def build_url(url: str, params: dict, remove_none=False, split_lists=False, enum
     def get_val(val):
         if not enum_value:
             return str(val)
-        if isinstance(val, Enum):
-            return str(val.value)
-        return str(val)
+        return str(val.value) if isinstance(val, Enum) else str(val)
 
     def add_param(res, k, v):
         if len(res) > 0:
             res += "&"
         res += str(k)
         if v is not None:
-            res += "=" + urllib.parse.quote(get_val(v))
+            res += f"={urllib.parse.quote(get_val(v))}"
         return res
 
     result = ""
@@ -71,7 +69,7 @@ def build_url(url: str, params: dict, remove_none=False, split_lists=False, enum
                 result = add_param(result, key, va)
         else:
             result = add_param(result, key, value)
-    return url + (("?" + result) if len(result) > 0 else "")
+    return url + (f"?{result}" if len(result) > 0 else "")
 
 
 def get_uuid():
@@ -106,23 +104,17 @@ def fields_to_enum(data: Union[dict, list],
     _enum_vals = [e.value for e in _enum.__members__.values()]
 
     def make_dict_field_enum(data: dict,
-                             fields: List[str],
-                             _enum: Type[Enum],
-                             default: Optional[Enum]) -> Union[dict, Enum, None]:
+                                 fields: List[str],
+                                 _enum: Type[Enum],
+                                 default: Optional[Enum]) -> Union[dict, Enum, None]:
         fd = data
         if isinstance(data, str):
-            if data not in _enum_vals:
-                return default
-            else:
-                return _enum(data)
+            return default if data not in _enum_vals else _enum(data)
         for key, value in data.items():
             # TODO fix for non string values
             if isinstance(value, str):
                 if key in fields:
-                    if value not in _enum_vals:
-                        fd[key] = default
-                    else:
-                        fd[key] = _enum(value)
+                    fd[key] = default if value not in _enum_vals else _enum(value)
             elif isinstance(value, dict):
                 fd[key] = make_dict_field_enum(value, fields, _enum, default)
             elif isinstance(value, list):
@@ -137,10 +129,7 @@ def fields_to_enum(data: Union[dict, list],
 
 def make_enum(data: str, _enum: Type[Enum], default: Enum) -> Enum:
     _enum_vals = [e.value for e in _enum.__members__.values()]
-    if data in _enum_vals:
-        return _enum(data)
-    else:
-        return default
+    return _enum(data) if data in _enum_vals else default
 
 
 def enum_value_or_none(enum):

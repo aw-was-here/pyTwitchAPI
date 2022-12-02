@@ -199,7 +199,10 @@ class PubSub:
                                                'error': PubSubResponseError.NONE}
         timeout = datetime.datetime.utcnow() + datetime.timedelta(seconds=self.listen_confirm_timeout)
         confirmed = False
-        self.__logger.debug(f'sending {"" if subscribe else "un"}listen for topics {str(topics)} with nonce {nonce}')
+        self.__logger.debug(
+            f'sending {"" if subscribe else "un"}listen for topics {topics} with nonce {nonce}'
+        )
+
         await self.__send_message(listen_msg)
         # wait for confirm
         while not confirmed and datetime.datetime.utcnow() < timeout:
@@ -207,14 +210,13 @@ class PubSub:
             confirmed = self.__nonce_waiting_confirm[nonce]['received']
         if not confirmed:
             raise PubSubListenTimeoutException()
-        else:
-            error = self.__nonce_waiting_confirm[nonce]['error']
-            if error is not PubSubResponseError.NONE:
-                if error is PubSubResponseError.BAD_AUTH:
-                    raise TwitchAuthorizationException()
-                if error is PubSubResponseError.SERVER:
-                    raise TwitchBackendException()
-                raise TwitchAPIException(error)
+        error = self.__nonce_waiting_confirm[nonce]['error']
+        if error is not PubSubResponseError.NONE:
+            if error is PubSubResponseError.BAD_AUTH:
+                raise TwitchAuthorizationException()
+            if error is PubSubResponseError.SERVER:
+                raise TwitchBackendException()
+            raise TwitchAPIException(error)
 
     async def __send_message(self, msg_data):
         self.__logger.debug(f'sending message {json.dumps(msg_data)}')
@@ -257,7 +259,7 @@ class PubSub:
 
     async def __task_initial_listen(self):
         self.__startup_complete = True
-        if len(list(self.__topics.keys())) > 0:
+        if list(self.__topics.keys()):
             uuid = str(get_uuid())
             await self.__send_listen(uuid, list(self.__topics.keys()))
 
@@ -338,7 +340,7 @@ class PubSub:
                 asyncio.ensure_future(sub(uuid, msg_data))
 
     async def __handle_unknown(self, data):
-        self.__logger.warning('got message of unknown type: ' + str(data))
+        self.__logger.warning(f'got message of unknown type: {str(data)}')
 
 ###########################################################################################
 # Listener
@@ -361,9 +363,9 @@ class PubSub:
                 topic_data['subs'].pop(uuid)
                 if len(topic_data['subs'].keys()) == 0:
                     clear_topics.append(topic)
-        if self.__startup_complete and len(clear_topics) > 0:
+        if self.__startup_complete and clear_topics:
             await self.__send_listen(str(uuid), clear_topics, subscribe=False)
-        if len(clear_topics) > 0:
+        if clear_topics:
             for topic in clear_topics:
                 self.__topics.pop(topic)
 
